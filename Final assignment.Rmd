@@ -1,0 +1,132 @@
+---
+title: "Prediction assignment"
+author: "Sina"
+date: "27 11 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. 
+
+# Downloading and reading in data
+
+```{r}
+if(!file.exists("./data")){dir.create("./data")}
+fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileUrl,destfile="./data/training.csv", method = "curl")
+if(!file.exists("./data")){dir.create("./data")}
+fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl,destfile="./data/testing.csv", method = "curl")
+train <- read.csv("./data/training.csv")
+test <- read.csv("./data/testing.csv")
+```
+
+# Preparing environment
+
+```{r}
+#setting seed and loading packages
+set.seed(545)
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+```
+
+# Data preprocessing
+
+First, we need to create a training and testing set within the train data so we have something to check the accuracy of our algorithm on. 
+
+```{r} 
+inTrain  <- createDataPartition(train$classe, p=0.6, list=FALSE)
+training <- train[inTrain, ]
+testing  <- train[-inTrain, ]
+```
+
+Next, we need to clean up the data so we can work with it more easily and so the NAs don't confuse the prediction algorithm. For this, we remove all unneeded columns. These include those that mostly contain NA, those that have near zero variance (those columns don't add any extra information) and the first five as they contain time stamps and usernames.
+
+```{r}
+#next, we want to remove columsn with mostly NA values because they can interfer with a good model
+no_na <- apply(training, 2, function(x) mean(is.na(x))) > 0.95
+training <- training[, -which(no_na, no_na == FALSE)]
+testing <- testing[, -which(no_na, no_na == FALSE)]
+
+#we also want to remove all columns with near zero variance
+near_zero <- nearZeroVar(training)
+training <- training[, -near_zero]
+testing  <- testing[, -near_zero]
+
+#lastly, we can see that the first 5 column contain values like time and username so we can also remove those
+training <- training[,-(1:5)]
+testing <- testing[,-(1:5)]
+```
+
+This narrows down our number of variables considerably from 160 to 54 and make the data much more managable.
+
+Next, we will create a correlation plot to see, if any variable are highly correlated. This will help us judge if the data might benefit from further preprocessing with principle component analysis
+
+```{r}
+cormat <- cor(training[, -54])
+corrplot(cormat, method = "color", type = "lower", tl.cex = 0.8, tl.col = rgb(0,0,0))
+```
+
+The darker the colour, the higher the correlation. while there are a few dark spots, it looks light enough that we don't need pca.
+
+# Model construction
+
+For this assignment, I will built two different models and compare the accuracy to find the best one.
+First, I will use the random forest method as it is known for its accuracy.
+
+```{r}
+control_forest <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+fit_forest <- train(classe~., data = training, trControl = control_forest, method = "rf")
+```
+
+Next, I will use boosting because it is also very accurate.
+
+```{r}
+control_gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1, verboseIter = FALSE)
+fit_gbm <- train(classe~., data=training, method = "gbm", verbose = FALSE)
+```
+
+# Prediction trial
+
+Now, we can use these two models to predict values of the testing set. This will show us how well the algorithm works without using the actual data that we want to use it on in the end.
+We will start with the random forest.
+
+```{r}
+pred_forest <- predict(fit_forest, newdata = testing)
+conf_forest <- confusionMatrix(pred_forest, as.factor(testing$classe))
+conf_forest
+```
+
+This gives us an accuracy of 99.72% which is very good.
+Next, we will use the gbm model.
+
+```{r}
+pred_gbm <- predict(fit_gbm, newdata = testing)
+conf_gbm <- confusionMatrix(pred_gbm, as.factor(testing$classe))
+conf_gbm
+```
+
+This gives us an accuracy of98.85%.
+As we can see, the random forest model is more accurate, so we will pick that one.
+
+# Predicting test data
+
+Lastly, we will prdict the 20 values of the actual test set.
+
+```{r}
+predict_test <- predict(fit_forest, newdata=test)
+predict_test
+```
+
